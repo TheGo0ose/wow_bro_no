@@ -42,6 +42,8 @@ DELTA_FULL_SCALE_DB = 10.0  # |night - day| at which the delta colour is fully o
 HEAT_ZERO_DBM = -90.0
 HEAT_FULL_DBM = -120.0
 
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
 COVERAGE_GROUP = "Слой покрытия"
 OBJECTS_GROUP = "Объекты"
 
@@ -211,10 +213,12 @@ def _sites_layer(
 
 
 def _swatch(color: str, label: str) -> str:
-    return (
-        f'<div><span style="display:inline-block;width:14px;height:14px;background:{color};'
-        f'margin-right:6px;vertical-align:middle"></span>{html.escape(label)}</div>'
-    )
+    return f'<div class="cov-swatch"><i style="background:{color}"></i>{html.escape(label)}</div>'
+
+
+def _stat(label: str, value: str, css_class: str = "") -> str:
+    cls = f' class="{css_class}"' if css_class else ""
+    return f"<dt{cls}>{html.escape(label)}</dt><dd{cls}>{html.escape(value)}</dd>"
 
 
 def _legend_html(analysis: Analysis) -> str:
@@ -223,26 +227,76 @@ def _legend_html(analysis: Analysis) -> str:
     levels = "".join(_swatch(LEVEL_COLORS[level], LEVEL_LABELS[level]) for level in Level)
     delta = dn.median_delta_db
     delta_text = f"{delta:+.1f} дБм" if delta is not None else "нет данных"
+    pair = " + ".join(exact.site_ids) or "—"
+    greedy_pair = " + ".join(greedy.site_ids) or "—"
     return f"""
-    <div style="position:fixed;bottom:24px;left:12px;z-index:9999;background:#fff;
-                padding:10px 12px;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.3);
-                font:13px/1.5 sans-serif;color:#222;max-width:300px">
-      <div style="font-weight:bold;margin-bottom:4px">Покрытие района (RSRP, медиана)</div>
+    <div class="cov-legend">
+      <div class="cov-legend-title">Сигнал RSRP, медиана</div>
       {levels}
-      <hr style="margin:6px 0;border:none;border-top:1px solid #ddd">
-      <div>Отброшено строк: <b>{analysis.cleaning.dropped_rows}</b></div>
-      <div>Новые БС: <b>{html.escape(' + '.join(exact.site_ids) or '—')}</b>,
-           покрыто <b>{exact.covered_count}</b> из {weak_total} слабых</div>
-      <div style="color:{GREEDY_COLOR}">Жадный: {html.escape(' + '.join(greedy.site_ids) or '—')}
-           → {greedy.covered_count}</div>
-      <hr style="margin:6px 0;border:none;border-top:1px solid #ddd">
-      <div>День {DAY_START_HOUR:02d}–{NIGHT_START_HOUR:02d}: красных {len(dn.day.weak_cells)};
-           ночь: {len(dn.night.weak_cells)}</div>
-      <div>Ночь − день (медиана): <b>{delta_text}</b></div>
-      {_swatch(BETTER_AT_NIGHT, "ночью лучше")}
-      {_swatch(WORSE_AT_NIGHT, "ночью хуже (рамка — сменился цвет)")}
+      <div class="cov-divider"></div>
+      <dl class="cov-stats">
+        {_stat("Отброшено строк", str(analysis.cleaning.dropped_rows))}
+        {_stat("Новые БС", pair)}
+        {_stat("Покрыто слабых", f"{exact.covered_count} из {weak_total}")}
+        {_stat("Жадный", f"{greedy_pair} → {greedy.covered_count}", "cov-greedy")}
+      </dl>
+      <div class="cov-extra">
+        <div class="cov-divider"></div>
+        <div class="cov-legend-title">День и ночь</div>
+        <dl class="cov-stats">
+          {_stat(f"Красных днём ({DAY_START_HOUR:02d}–{NIGHT_START_HOUR:02d})",
+                 str(len(dn.day.weak_cells)))}
+          {_stat(f"Красных ночью ({NIGHT_START_HOUR:02d}–{DAY_START_HOUR:02d})",
+                 str(len(dn.night.weak_cells)))}
+          {_stat("Ночь − день", delta_text)}
+        </dl>
+        {_swatch(BETTER_AT_NIGHT, "ночью лучше")}
+        {_swatch(WORSE_AT_NIGHT, "ночью хуже (рамка — сменился цвет)")}
+      </div>
     </div>
     """
+
+
+_ICON_MOON = (
+    '<svg class="cov-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+)
+_ICON_SUN = (
+    '<svg class="cov-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/>'
+    '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2'
+    'M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+)
+_ICON_CHEVRON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>'
+)
+
+
+def _panel_header_html() -> str:
+    """Header that map_theme.js moves into the layer panel: title, theme and collapse buttons."""
+    return f"""
+    <template id="cov-header-template">
+      <div class="cov-header">
+        <div class="cov-title">
+          <div class="cov-title-main">Карта покрытия</div>
+          <div class="cov-title-sub">Бишкек · квадраты 200 × 200 м</div>
+        </div>
+        <button type="button" class="cov-icon-btn" id="cov-theme">{_ICON_MOON}{_ICON_SUN}</button>
+        <button type="button" class="cov-icon-btn" id="cov-collapse">{_ICON_CHEVRON}</button>
+      </div>
+    </template>
+    """
+
+
+def _add_theme(fmap: folium.Map) -> None:
+    css = (ASSETS_DIR / "map_theme.css").read_text(encoding="utf-8")
+    js = (ASSETS_DIR / "map_theme.js").read_text(encoding="utf-8")
+    root = fmap.get_root()
+    root.header.add_child(folium.Element(f"<style>{css}</style>"))
+    root.header.add_child(folium.Element(f"<script>{js}</script>"))
+    root.html.add_child(folium.Element(_panel_header_html()))
 
 
 def build_map(analysis: Analysis) -> folium.Map:
@@ -289,6 +343,7 @@ def build_map(analysis: Analysis) -> folium.Map:
         collapsed=False,
     ).add_to(fmap)
     fmap.get_root().html.add_child(folium.Element(_legend_html(analysis)))
+    _add_theme(fmap)
     fmap.fit_bounds([(b.lat_min, b.lon_min), (b.lat_max, b.lon_max)])
     return fmap
 
